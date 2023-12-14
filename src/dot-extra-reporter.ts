@@ -1,15 +1,17 @@
-import { Transform, type TransformCallback } from 'node:stream';
-import chalk from 'chalk';
+import { Transform, type TransformCallback } from "node:stream";
+import chalk from "chalk";
 
 type Suite = {
   file: string;
   name: string;
   nesting: number;
+  message?: string;
 };
 
 type Test = {
   file: string;
   name: string;
+  message?: string;
   details: {
     duration_ms: number;
     type: string;
@@ -53,29 +55,35 @@ class DotExtraReporter extends Transform {
     const suite = event.data as Suite;
 
     switch (event.type) {
-      case 'test:pass':
-        if (test.details.type !== 'suite') {
+      case "test:pass":
+        if (test.details.type !== "suite") {
           this.passedTests++;
           this.totalDuration += test.details.duration_ms;
-          process.stdout.write(chalk.green('.'));
+          process.stdout.write(chalk.green("."));
         }
         break;
-      case 'test:fail':
-        if (test.details.type === 'suite') {
+      case "test:fail":
+        if (test.details.type === "suite") {
           this.failedSuites.push(suite);
         } else {
           this.failedTests.push(test);
           this.totalDuration += test.details.duration_ms;
-          process.stdout.write(chalk.red('F'));
+          process.stdout.write(chalk.red("F"));
         }
         break;
-      case 'test:skip':
-      case 'test:todo':
+      case "test:skip":
+      case "test:todo":
         this.skippedTests++;
-        process.stdout.write('*');
+        process.stdout.write("*");
         break;
-      case 'test:watch:drained':
+      case "test:watch:drained":
         this._flush();
+        break;
+      case "test:stdout":
+        process.stdout.write(event.data.message ?? '')
+        break;
+      case "test:stderr":
+        process.stderr.write(chalk.red(event.data.message ?? ''))
         break;
       default:
         break;
@@ -85,15 +93,15 @@ class DotExtraReporter extends Transform {
 
   public override _flush() {
     if (this.failedTests.length > 0) {
-      console.log(chalk.red('\n✖') + ' failing tests:');
-      this.failedTests.forEach(test => {
+      console.log(chalk.red("\n✖") + " failing tests:");
+      this.failedTests.forEach((test) => {
         const suites = this.failedSuites
-          .filter(suite => suite.file === test.file)
+          .filter((suite) => suite.file === test.file)
           .sort((a, b) => a.nesting - b.nesting);
         const fullName = suites
-          .map(suite => suite.name)
+          .map((suite) => suite.name)
           .concat(test.name)
-          .join(' > ');
+          .join(" > ");
         console.log(
           chalk.red(`\n✖ ${fullName} (${test.details.duration_ms}ms)`)
         );

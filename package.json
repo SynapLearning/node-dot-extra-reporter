@@ -1,7 +1,7 @@
 {
   "name": "@synap-ac/node-dot-extra-reporter",
   "author": "Synap Ltd",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "license": "MIT",
   "description": "Custom dot reporter for the node test runner",
   "type": "module",
