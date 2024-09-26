@@ -1,5 +1,6 @@
 import { Transform, type TransformCallback } from "node:stream";
 import chalk from "chalk";
+import test from "node:test";
 
 type Suite = {
   file: string;
@@ -19,6 +20,8 @@ type Test = {
       cause: string;
     };
   };
+  skip?: boolean | string;
+  todo?: boolean | string;
 };
 
 type Event = {
@@ -29,7 +32,9 @@ type Event = {
 class DotExtraReporter extends Transform {
   private passedTests: number;
 
-  private skippedTests: number;
+  private skippedTests: Test[];
+
+  private todoTests: Test[];
 
   private totalDuration: number;
 
@@ -40,7 +45,8 @@ class DotExtraReporter extends Transform {
   constructor(options = {}) {
     super({ ...options, writableObjectMode: true });
     this.passedTests = 0;
-    this.skippedTests = 0;
+    this.skippedTests = [];
+    this.todoTests = [];
     this.totalDuration = 0;
     this.failedTests = [];
     this.failedSuites = [];
@@ -54,41 +60,48 @@ class DotExtraReporter extends Transform {
     const test = event.data as Test;
     const suite = event.data as Suite;
 
-    switch (event.type) {
-      case "test:pass":
-        if (test.details.type !== "suite") {
-          this.passedTests++;
-          this.totalDuration += test.details.duration_ms;
-          process.stdout.write(chalk.green("."));
-        }
-        break;
-      case "test:fail":
-        if (test.details.type === "suite") {
-          this.failedSuites.push(suite);
-        } else {
-          this.failedTests.push(test);
-          this.totalDuration += test.details.duration_ms;
-          process.stdout.write(chalk.red("F"));
-        }
-        break;
-      case "test:skip":
-      case "test:todo":
-        this.skippedTests++;
-        process.stdout.write("*");
-        break;
-      case "test:watch:drained":
-        this._flush();
-        break;
-      case "test:stdout":
-        process.stdout.write(event.data.message ?? '')
-        break;
-      case "test:stderr":
-        process.stderr.write(chalk.red(event.data.message ?? ''))
-        break;
-      default:
-        break;
+    // Skipped and Todo tests are marked by metadata and not by the test result.
+    if (test.skip || test.todo) {
+      if (test.skip) {
+        process.stdout.write(chalk.yellow("*"));
+        this.skippedTests.push(test);
+      } else {
+        process.stdout.write(chalk.blue("-"));
+        this.todoTests.push(test);
+      }
+      callback();
+    } else {
+      switch (event.type) {
+        case "test:pass":
+          if (test.details.type !== "suite") {
+            this.passedTests++;
+            this.totalDuration += test.details.duration_ms;
+            process.stdout.write(chalk.green("."));
+          }
+          break;
+        case "test:fail":
+          if (test.details.type === "suite") {
+            this.failedSuites.push(suite);
+          } else {
+            this.failedTests.push(test);
+            this.totalDuration += test.details.duration_ms;
+            process.stdout.write(chalk.red("F"));
+          }
+          break;
+        case "test:watch:drained":
+          this._flush();
+          break;
+        case "test:stdout":
+          process.stdout.write(event.data.message ?? '')
+          break;
+        case "test:stderr":
+          process.stderr.write(chalk.red(event.data.message ?? ''))
+          break;
+        default:
+          break;
+      }
+      callback();
     }
-    callback();
   }
 
   public override _flush() {
@@ -111,16 +124,18 @@ class DotExtraReporter extends Transform {
 
     console.log(
       `\n\nℹ Tests    ${
-        this.passedTests + this.failedTests.length + this.skippedTests
+        this.passedTests + this.failedTests.length + this.skippedTests.length + this.todoTests.length
       }`
     );
     console.log(`ℹ Passed   ${chalk.green(this.passedTests)}`);
     console.log(`ℹ Failed   ${chalk.red(this.failedTests.length)}`);
-    console.log(`ℹ Skipped  ${chalk.yellow(this.skippedTests)}`);
+    console.log(`ℹ Skipped  ${chalk.yellow(this.skippedTests.length)}`);
+    console.log(`ℹ Todo     ${chalk.blue(this.todoTests.length)}`);
     console.log(`ℹ Duration ${this.totalDuration.toFixed(0)}ms`);
 
     this.passedTests = 0;
-    this.skippedTests = 0;
+    this.skippedTests = [];
+    this.todoTests = [];
     this.totalDuration = 0;
     this.failedTests = [];
     this.failedSuites = [];
