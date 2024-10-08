@@ -81,71 +81,62 @@ class DotExtraReporter extends Transform {
     this.testSuite = {};
   }
 
-  private buildMap(test: Test, eventType: EventType) {
-    // Definition order
-    // test:start
-    // test:pass | test:fail
-    // test:plan (suite finished)
+  private handleTestStart(test: Test) {
+    // Add new child
+    const newItem = {
+      file: test.file,
+      name: test.name,
+      nesting: test.nesting,
+      children: {},
+    };
 
-    if (eventType === EventType.START) {
-      // Add new child
-      const newItem = {
-        file: test.file,
-        name: test.name,
-        nesting: test.nesting,
-        children: {},
-      };
+    // If nesting > current nesting then
+    // We've moved into a nested suite so:
+    // - Add the current suite to the lineage
+    // - Add new item as a child of the current suite
+    if (test.nesting === 0) {
+      // First entry
+      this.currentSuite = newItem;
+      this.testSuite[`${test.file}:${test.name}`] = newItem;
+    } else if (test.nesting > this.nesting) {
+      this.currentSuiteLineage.push(this.currentSuite!);
+      this.currentSuite!.children![test.name] = newItem;
 
-      // If nesting > current nesting then
-      // We've moved into a nested suite so:
-      // - Add the current suite to the lineage
-      // - Add new item as a child of the current suite
-      if (test.nesting === 0) {
-        // First entry
-        this.currentSuite = newItem;
-        this.testSuite[`${test.file}:${test.name}`] = newItem;
-      } else if (test.nesting > this.nesting) {
-        this.currentSuiteLineage.push(this.currentSuite!);
-        this.currentSuite!.children![test.name] = newItem;
-
-        this.currentSuite = newItem;
-      } else {
-        // Not deeper so add to current parent, and set new item to current
-        const parent = this.currentSuiteLineage.pop();
-        parent!.children![test.name] = newItem;
-        this.currentSuiteLineage.push(parent!);
-        this.currentSuite = newItem;
-      }
+      this.currentSuite = newItem;
+    } else {
+      // Not deeper so add to current parent, and set new item to current
+      const parent = this.currentSuiteLineage.pop();
+      parent!.children![test.name] = newItem;
+      this.currentSuiteLineage.push(parent!);
+      this.currentSuite = newItem;
     }
+    this.nesting = test.nesting;
+  }
 
-    if (eventType === EventType.PASS || eventType === EventType.FAIL) {
-      if (test.name === test.file) {
-        return;
-      }
-      // Update test result details
-      this.currentSuite!.passed = eventType === EventType.PASS;
+  private handleTestResult(test: Test, eventType: EventType) {
+    // Update test result details
+    this.currentSuite!.passed = eventType === EventType.PASS;
 
-      if (test.details) {
-        this.currentSuite!.details = test.details;
-      }
-      if (test.skip) {
-        process.stdout.write(chalk.yellow("*"));
-        this.currentSuite!.skip = test.skip;
-      } else if (test.todo) {
-        process.stdout.write(chalk.blue("-"));
-        this.currentSuite!.todo = test.todo;
-      } else if (this.currentSuite!.passed) {
-        process.stdout.write(chalk.green("."));
-      } else {
-        process.stdout.write(chalk.red("F"));
-      }
+    if (test.details) {
+      this.currentSuite!.details = test.details;
     }
-
-    if (eventType === EventType.PLAN) {
-      // Suite finished, step up to parent
-      this.currentSuite = this.currentSuiteLineage.pop();
+    if (test.skip) {
+      process.stdout.write(chalk.yellow("*"));
+      this.currentSuite!.skip = test.skip;
+    } else if (test.todo) {
+      process.stdout.write(chalk.blue("-"));
+      this.currentSuite!.todo = test.todo;
+    } else if (this.currentSuite!.passed) {
+      process.stdout.write(chalk.green("."));
+    } else {
+      process.stdout.write(chalk.red("F"));
     }
+    this.nesting = test.nesting;
+  }
 
+  private handleTestEnd(test: Test) {
+    // Suite finished, step up to parent
+    this.currentSuite = this.currentSuiteLineage.pop();
     this.nesting = test.nesting;
   }
 
@@ -157,9 +148,29 @@ class DotExtraReporter extends Transform {
     try {
       const test = event.data as Test;
 
-      if (test.file) {
-        this.buildMap(test, event.type);
+      switch (event.type) {
+        case EventType.START:
+          this.handleTestStart(test);
+          break;
+        case EventType.PASS:
+        case EventType.FAIL:
+          if (test.name !== test.file) {
+            this.handleTestResult(test, event.type);
+          }
+          break;
+        case EventType.PLAN:
+          this.handleTestEnd(test);
+          break;
+        case EventType.STDOUT:
+          process.stdout.write(event.data.message ?? "");
+          break;
+        case EventType.STDERR:
+          process.stderr.write(event.data.message ?? "");
+          break;
+        default:
+          break;
       }
+
       callback();
     } catch (error) {
       console.log(error);
@@ -186,13 +197,11 @@ class DotExtraReporter extends Transform {
       Object.values(suite.children!).forEach((child) =>
         this.buildStats(
           child,
-          prefix
-            ? `${prefix} > ${suite.name}`
-            : suite.name
+          prefix ? `${prefix} > ${suite.name}` : suite.name
         )
       );
     }
-     
+
     if (prefix) {
       suite.name = `${prefix} > ${suite.name}`;
     }
@@ -200,18 +209,16 @@ class DotExtraReporter extends Transform {
       this.skippedTests.push(suite as Test);
     } else if (suite.todo) {
       this.todoTests.push(suite as Test);
-    } else if(!isSuite(suite)) {
+    } else if (!isSuite(suite)) {
       if (suite.passed === false) {
         this.failedTests.push(suite as Test);
       } else {
-
         this.passedTests++;
       }
     }
   }
 
   public override _flush() {
-
     this.processOutcomes();
 
     if (this.skippedTests.length > 0) {

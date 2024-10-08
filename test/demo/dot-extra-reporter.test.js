@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 
 describe('First DotExtraReporter', () => {
   it('should work', () => {
+    console.log('************* Std out test *************');
+    console.error('************* Std err test *************');
   });
   
   it.skip('should skip', () => {
